@@ -1,7 +1,6 @@
 /* Buildless, offline-capable viewer. No network requests or third-party scripts. */
 (()=>{'use strict';
 const D=window.SENIORITY_DATA;
-const bases={P:'PHX',M:'MIA',O:'ORD',D:'DFW',W:'DCA'};
 const group=s=>/^[PMODW][CF][LR]$/.test(s||'')?s.slice(0,2):'';
 const fmt=(v,d=0)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-US',{maximumFractionDigits:d}):'—';
 const month=d=>d?new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'}):'Not projected';
@@ -26,8 +25,8 @@ window.ENY_CORE={group,baseView,fmt};
 if(typeof document==='undefined')return;
 const $=id=>document.getElementById(id);
 const make=(tag,text,cls)=>{const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;};
-if(!D||D.version!==2){$('lookup-message').textContent='Website data is missing or incompatible. Upload all exported docs files together.';return;}
-let selected=null,page=0;
+if(!D||D.version!==3){$('lookup-message').textContent='Website data is missing or incompatible. Upload all exported docs files together.';return;}
+let selected=null;
 function tab(name){for(const el of document.querySelectorAll('.view'))el.hidden=el.id!==name;for(const el of document.querySelectorAll('.tab')){el.classList.toggle('active',el.dataset.tab===name);if(el.dataset.tab===name)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');}}
 document.querySelectorAll('.tab').forEach(el=>el.addEventListener('click',()=>tab(el.dataset.tab)));
 $('asof').textContent='Roster as of '+date(D.asOf);$('published').textContent='Workbook published '+date(D.published);
@@ -48,10 +47,10 @@ function chart(){
  node('text',{x:55,y:239,fill:'#718490','font-size':11},month(D.asOf));node('text',{x:600,y:239,fill:'#718490','font-size':11,'text-anchor':'end'},month(D.months[count-1]));box.append(svg);
 }
 function overview(){
- const p=selected;if(!p)window.ENY_PAY_UI?.select(null);$('pilot-title').textContent=p?p.name:'Your place in the system';$('assignment').textContent=p?(p.current||'Not listed'):'Select a pilot above';
+ const p=selected;if(!p)window.ENY_PAY_UI?.select(null);$('pilot-title').textContent=p?'Your pilot profile':'Your place in the system';$('assignment').textContent=p?(p.current||'Not listed'):'Look up a profile above';
  const stats=[['System seniority',p?'#'+fmt(p.rank):'—',fmt(D.pilots.length)+' pilots on the roster'],['Projected AA flow',p?month(p.flow):'—','Planning estimate, subject to eligibility'],['Years to flow',p&&p.yearsToFlow!==null?fmt(p.yearsToFlow,1):'—','From the workbook’s source date'],['Flow queue',p&&p.queue!==null?'#'+fmt(p.queue):'—','Unawarded projection queue']];
  $('stats').replaceChildren(...stats.map(([label,val,note],i)=>{const el=make('article',undefined,'stat'+(i===0?' accent':''));el.append(make('small',label),make('strong',val),make('span',note));return el;}));
- const rows=p?[['Current status',p.current||'—'],['Next assignment',p.next||'—'],['Final assignment',p.final||'—'],['Envoy years at flow',fmt(p.envoyYearsToFlow,1)]]:[['Profile','Enter a seniority rank above.']];
+ const rows=p?[['Current status',p.current||'—'],['Next assignment',p.next||'—'],['Final assignment',p.final||'—'],['Envoy years at flow',fmt(p.envoyYearsToFlow,1)]]:[['Profile','Enter your employee ID above.']];
  $('profile').replaceChildren(...rows.flatMap(([a,b])=>[make('dt',a),make('dd',b)]));chart();renderBases();
 }
 function rememberRank(){
@@ -60,21 +59,18 @@ function rememberRank(){
   else localStorage.removeItem('enyRosterRank');
  }catch{}
 }
-function selectPilot(p){selected=p;$('rank-lookup').value=p.rank;$('lookup-message').textContent=`Found ${p.name} · system seniority ${fmt(p.rank)}`;rememberRank();overview();window.ENY_PAY_UI?.select(p);}
-$('lookup').addEventListener('submit',event=>{event.preventDefault();const rank=Number($('rank-lookup').value.trim());const p=D.pilots.find(p=>p.rank===rank);if(p){selectPilot(p);tab('overview');}else{selected=null;rememberRank();overview();$('lookup-message').textContent='Seniority rank not found. Check your rank against the roster date.';}});
+function selectPilot(p){selected=p;$('lookup-message').textContent=`Profile found · system seniority ${fmt(p.rank)}`;rememberRank();overview();window.ENY_PAY_UI?.select(p);}
+$('lookup').addEventListener('submit',event=>{
+ event.preventDefault();
+ const input=$('employee-lookup');
+ const employee=input.value.trim();
+ const rank=/^[0-9]{1,6}$/.test(employee)?D.lookup[employee.padStart(6,'0')]:undefined;
+ const pilot=D.pilots.find(p=>p.rank===rank);
+ if(pilot){input.value='';selectPilot(pilot);tab('overview');}
+ else{selected=null;rememberRank();overview();$('lookup-message').textContent='Employee ID not found. Check your entry and the roster date.';}
+});
 $('remember').addEventListener('change',rememberRank);
 $('horizon').addEventListener('change',chart);
-function roster(){
- const search=$('search').value.trim().toLowerCase(),base=$('base-filter').value,seat=$('seat-filter').value;
- const filtered=D.pilots.filter(p=>(!search||p.name.toLowerCase().includes(search)||String(p.rank)===search)&&(!base||bases[group(p.current)[0]]===base)&&(!seat||group(p.current)[1]===seat));
- page=Math.min(page,Math.max(0,Math.ceil(filtered.length/50)-1));const offset=page*50;
- $('roster-total').textContent=fmt(filtered.length)+' pilots';
- const rows=filtered.slice(offset,offset+50).map(p=>{const tr=make('tr');[fmt(p.rank),p.name,p.current,p.next,p.final,p.flow?month(p.flow):'Not projected',fmt(p.queue)].forEach((val,i)=>{const td=make('td');if(i===1){const button=make('button',val,'pilot-link');button.addEventListener('click',()=>{selectPilot(p);tab('overview');$('rank-lookup').focus();});td.append(button);}else td.textContent=val||'—';tr.append(td);});return tr;});
- if(!rows.length){const tr=make('tr'),td=make('td','No pilots match these filters.');td.colSpan=7;tr.append(td);rows.push(tr);}$('roster-rows').replaceChildren(...rows);
- $('page-info').textContent=filtered.length?`${offset+1}–${Math.min(offset+50,filtered.length)} of ${fmt(filtered.length)}`:'0 results';$('previous').disabled=page===0;$('next').disabled=offset+50>=filtered.length;
-}
-for(const id of ['search','base-filter','seat-filter'])$(id).addEventListener('input',()=>{page=0;roster();});
-$('previous').addEventListener('click',()=>{page--;roster();});$('next').addEventListener('click',()=>{page++;roster();});
 D.baseMonths.forEach((m,i)=>{const option=make('option',month(m));option.value=i;$('base-month').append(option);});$('base-month').addEventListener('change',renderBases);
 function renderBases(){
  $('base-grid').replaceChildren(...D.capacities.map(c=>{const v=baseView(D,selected,c,Number($('base-month').value)),card=make('article',undefined,'base-card'),heading=make('div',undefined,'base-head'),title=make('div');
@@ -91,7 +87,7 @@ if(D.staffing){
  box.append(make('h3','Pilot staffing · '+date(D.staffing.asOf)),grid,make('p',D.staffing.note,'note'));
  $('changes').querySelector('.section-heading').after(box);
 }
-overview();roster();try{
+overview();try{
  localStorage.removeItem('enyEmployee');
  const saved=JSON.parse(localStorage.getItem('enyRosterRank'));
  const p=saved?.roster===D.workbookHash&&D.pilots.find(p=>p.rank===saved.rank);
